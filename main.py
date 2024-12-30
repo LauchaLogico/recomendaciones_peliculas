@@ -26,8 +26,8 @@ class ConfigurableNN:
         return self.nn.kneighbors(feature, n_neighbors=n_neighbors)
 
 # Cargar y procesar los datasets
-movies_api = pd.read_csv("Dataset/recomendacion_api.csv")
-genres_data = pd.read_csv("Dataset/genres_api.csv")
+movies_api = pd.read_csv("recomendacion_api.csv")
+genres_data = pd.read_csv("genres_api.csv")
 
 movies_api["id"] = movies_api["id"].astype(str)
 genres_data["id_original"] = genres_data["id_original"].astype(str)
