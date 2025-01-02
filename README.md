@@ -19,11 +19,10 @@
 Este proyecto te recomienda la cantidad de peliculas que elijas y que sean similares a una pelicula que hayas visto y te gustó. Esto es posible gracias a la gran base de datos con la que cuenta y al uso de la IA para obtener las peliculas mas parecidas.
 Para hacer uso de esta aplicacion puedes utilizar el siguente link https://recomendaciones-de-peliculas.onrender.com o clonar el repo en tu computadora local. 
 
-
-
 ### Requisitos
-- Python 3.7 o superior
-- pandas
-- numpy
-- matplotlib
-- scikit-learn
+fastapi
+uvicorn
+scikit-learn
+scipy
+pandas
+numpy
