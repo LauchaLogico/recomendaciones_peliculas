@@ -7,8 +7,8 @@ from fastapi import FastAPI
 from sklearn.feature_extraction.text import CountVectorizer
 
 # Cargar los datasets
-movies_api1 = pd.read_csv("recomendaciones/recomendacion_api.csv")
-genres_data1 = pd.read_csv("recomendaciones/genres_api.csv")
+movies_api1 = pd.read_csv("Data/recomendacion_api.csv")
+genres_data1 = pd.read_csv("Data/genres_api.csv")
 
 # Asegurarse de que ambas columnas tengan el mismo tipo
 movies_api1["id"] = movies_api1["id"].astype(str)
