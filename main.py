@@ -17,7 +17,7 @@ genres_data1["id_original"] = genres_data1["id_original"].astype(str)
     # Procesar géneros para asegurar que no se repitan
 movies_with_genres1 = pd.merge(movies_api1, genres_data1, left_on="id", right_on="id_original", how="left")
 
-movies_with_genres2 = movies_with_genres1.sample(n=10000, random_state=42)
+movies_with_genres2 = movies_with_genres1.sample(n=5000, random_state=42)
 
 movies_with_genres2 = movies_with_genres2.groupby("id_original").agg({
     "title": "first",
