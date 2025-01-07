@@ -1,97 +1,101 @@
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
 from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.preprocessing import MinMaxScaler
-from sklearn.neighbors import NearestNeighbors
-from scipy.sparse import hstack, csr_matrix
 import pandas as pd
 import numpy as np
+from fastapi import FastAPI
+from sklearn.feature_extraction.text import CountVectorizer
 
-# Crear la aplicación FastAPI
-app = FastAPI()
+# Cargar los datasets
+movies_api1 = pd.read_csv("recomendaciones/recomendacion_api.csv")
+genres_data1 = pd.read_csv("recomendaciones/genres_api.csv")
 
-# Definir modelos para la API
-class RecommendationRequest(BaseModel):
-    title: str
-    n: int = 5
+# Asegurarse de que ambas columnas tengan el mismo tipo
+movies_api1["id"] = movies_api1["id"].astype(str)
+genres_data1["id_original"] = genres_data1["id_original"].astype(str)
 
-class ConfigurableNN:
-    def __init__(self, metric="cosine", algorithm="auto"):
-        self.nn = NearestNeighbors(metric=metric, algorithm=algorithm)
+    # Procesar géneros para asegurar que no se repitan
+movies_with_genres1 = pd.merge(movies_api1, genres_data1, left_on="id", right_on="id_original", how="left")
 
-    def fit(self, features):
-        self.nn.fit(features)
+movies_with_genres2 = movies_with_genres1.sample(n=10000, random_state=42)
 
-    def kneighbors(self, feature, n_neighbors=5):
-        return self.nn.kneighbors(feature, n_neighbors=n_neighbors)
-
-# Cargar y procesar los datasets
-movies_api = pd.read_csv("Data/recomendacion_api.csv")
-genres_data = pd.read_csv("Data/genres_api.csv")
-
-movies_api["id"] = movies_api["id"].astype(str)
-genres_data["id_original"] = genres_data["id_original"].astype(str)
-
-movies_with_genres = pd.merge(movies_api, genres_data, left_on="id", right_on="id_original", how="left")
-
-movies_with_genres = movies_with_genres.groupby("id_original").agg({
+movies_with_genres2 = movies_with_genres2.groupby("id_original").agg({
     "title": "first",
     "name": lambda x: " ".join(set(x.dropna())),
-    "vote_average": "first",
-    "popularity": "first"
+    "vote_average": "first",  # Mantén la puntuación
+    "popularity": "first"  # Mantén la popularidad
 }).reset_index()
 
-movies_with_genres["combined_features"] = (
-    movies_with_genres["title"].fillna("") + " " +
-    movies_with_genres["name"].fillna("")
+# Combinar texto y géneros en una nueva columna 'combined_features'
+movies_with_genres2["combined_features"] = (
+    movies_with_genres2["title"].fillna("") + " " +
+    movies_with_genres2["name"].fillna("")
 )
-
+# Vectorizar el texto combinado usando TF-IDF
 tfidf = TfidfVectorizer(stop_words="english", max_features=5000)
-tfidf_matrix = tfidf.fit_transform(movies_with_genres["combined_features"])
+tfidf_matrix = tfidf.fit_transform(movies_with_genres2["combined_features"])
 
+# Normalizar las puntuaciones numéricas
 scaler = MinMaxScaler()
-movies_with_genres[["vote_average", "popularity"]] = scaler.fit_transform(
-    movies_with_genres[["vote_average", "popularity"]]
+movies_with_genres2[["vote_average", "popularity"]] = scaler.fit_transform(
+    movies_with_genres2[["vote_average", "popularity"]]
 )
 
-numerical_features = csr_matrix(movies_with_genres[["vote_average", "popularity"]].values)
+#reduzco el tipo de datos
+movies_with_genres2 = movies_with_genres2.astype({'vote_average': 'float16', 'popularity': 'float16'})
 
-final_features = hstack([tfidf_matrix, numerical_features])
 
-# Instancia configurable de NearestNeighbors
-nn = ConfigurableNN(metric="cosine", algorithm="auto")
-nn.fit(final_features)
+# Agregar las características numéricas a la matriz TF-IDF
+numerical_features = movies_with_genres2[["vote_average", "popularity"]].values
+final_features = np.hstack((tfidf_matrix.toarray(), numerical_features))
 
-# Función para encontrar películas similares
-def find_similar_movies(title, n=5):
-    if title not in movies_with_genres["title"].values:
-        raise ValueError(f"La película '{title}' no se encontró en la base de datos.")
 
-    idx = movies_with_genres[movies_with_genres["title"] == title].index[0]
-    distances, indices = nn.kneighbors(final_features[idx], n_neighbors=n+1)
-    recommended_titles = movies_with_genres.iloc[indices[0]]['title'].tolist()
-    recommended_titles = [t for t in recommended_titles if t != title]
 
-    # Rellenar con títulos adicionales si faltan recomendaciones
-    if len(recommended_titles) < n:
-        extra_titles = movies_with_genres[~movies_with_genres["title"].isin(recommended_titles + [title])]["title"].tolist()
-        recommended_titles.extend(extra_titles[:n - len(recommended_titles)])
+# Calcular la matriz de similitud usando Cosine Similarity
+similarity_matrix = cosine_similarity(final_features)
 
-    return recommended_titles[:n]
 
-# Endpoints de la API
-@app.get("/")
-def root():
-    return {"message": "Bienvenido a la API de recomendación de películas."}
+app = FastAPI()
 
-@app.post("/recommendations/")
-def get_recommendations(request: RecommendationRequest):
+# Función de recomendación
+@app.get("/recomendacion/{titulo}")
+def recomendacion1(titulo: str):
     try:
-        if not request.title:
-            raise HTTPException(status_code=400, detail="El título de la película es obligatorio.")
-        recommendations = find_similar_movies(request.title, request.n)
-        return {"title": request.title, "recommendations": recommendations}
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        # Verificar que el título esté en el dataset
+        if titulo not in movies_with_genres2["title"].values:
+            return {"mensaje": f"La película '{titulo}' no se encuentra en el dataset."}
+
+        # Crear una nueva columna combinando título y géneros
+        movies_with_genres2["combined_features"] = (
+            movies_with_genres2["title"] + " " + movies_with_genres2["name"]
+        )
+
+        # Preprocesar las características combinadas
+        count_vectorizer = CountVectorizer(stop_words="english")
+        feature_matrix = count_vectorizer.fit_transform(movies_with_genres2["combined_features"])
+
+        # Calcular la similitud coseno
+        similarity_matrix = cosine_similarity(feature_matrix, feature_matrix)
+
+        # Obtener el índice de la película dada
+        idx = movies_with_genres2[movies_with_genres2["title"] == titulo].index[0]
+
+        # Ordenar películas por similitud
+        similarity_scores = list(enumerate(similarity_matrix[idx]))
+        similarity_scores = sorted(similarity_scores, key=lambda x: x[1], reverse=True)
+
+        # Obtener las 5 películas más similares (excluyendo duplicados y la misma película)
+        seen_titles = set()  # Conjunto para rastrear títulos únicos
+        seen_titles.add(titulo)
+        top_movies = []
+        for i, score in similarity_scores[1:]:  # Excluir la película misma
+            movie_title = movies_with_genres2.iloc[i]["title"]
+            if movie_title not in seen_titles:
+                seen_titles.add(movie_title)
+                top_movies.append(movie_title)
+            if len(top_movies) == 5:  # Detener al alcanzar 5 recomendaciones
+                break
+
+        return {"recomendaciones": top_movies}
     except Exception as e:
-        raise HTTPException(status_code=500, detail="Error interno del servidor.")
+        return {"error": f"Ocurrió un error: {str(e)}"}
